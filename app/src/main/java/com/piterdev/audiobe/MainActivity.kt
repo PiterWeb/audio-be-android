@@ -1,6 +1,7 @@
 package com.piterdev.audiobe
 
 import android.content.ComponentName
+import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioManager
@@ -32,11 +33,10 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -45,13 +45,14 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
-import com.google.common.util.concurrent.MoreExecutors
+
 import com.piterdev.audiobe.ui.theme.AudioBETheme
-import kotlinx.coroutines.launch
 import java.io.InputStream
 import java.io.OutputStream
 import java.lang.Thread.sleep
@@ -76,34 +77,28 @@ class MainActivity : ComponentActivity() {
 
             val mediaController = remember { mutableStateOf<MediaController?>(null)}
 
+            val currentPlaybackState = remember { mutableIntStateOf(Player.STATE_BUFFERING) }
+            val isPlaying = remember { mutableStateOf(true) }
+
             LaunchedEffect(Unit) {
                 Thread {
                     startPlayback(host.value, port)
                 }.start()
+            }
 
-                val sessionToken =
-                    SessionToken(context, ComponentName(context, PlaybackService::class.java))
-
-                val controllerFuture = MediaController.Builder(context, sessionToken).buildAsync()
-                controllerFuture.addListener(
-                    {
-                        mediaController.value = controllerFuture.get()
-
-                        val mediaItem =
-                            MediaItem.Builder()
-                                .setMediaId("audiobe")
-                                .setMediaMetadata(
-                                    MediaMetadata.Builder()
-                                        .setTitle("AudioBE")
-                                        .build()
-                                )
-                                .build()
-
-                        mediaController.value?.setMediaItem(mediaItem)
-                        mediaController.value?.prepare()
-                    },
-                    MoreExecutors.directExecutor(),
-                )
+            LaunchedEffect(Unit) {
+                buildMediaController(context = context, {
+                    mediaController.value = it
+                    mediaController.value?.addListener(object : Player.Listener {
+                        override fun onIsPlayingChanged(playing: Boolean) {
+                            isPlaying.value = playing
+                        }
+                        override fun onPlaybackStateChanged(playbackState: Int) {
+                            super.onPlaybackStateChanged(playbackState)
+                            currentPlaybackState.intValue = playbackState
+                        }
+                    })
+                })
             }
 
             AudioBETheme {
@@ -162,6 +157,7 @@ class MainActivity : ComponentActivity() {
                                             it.write(1)
                                         }
                                     }.start()
+                                    isPlaying.value = !isPlaying.value
                                 },
                                 colors = IconButtonColors(
                                     containerColor = MaterialTheme.colorScheme.primaryContainer,
@@ -201,18 +197,43 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    fun getActionIO(host: String, port: Int): Pair<InputStream, OutputStream> {
-        try {
-            val socket = Socket(host, port)
-            val outputStream = socket.getOutputStream()
+    fun buildMediaController(context: Context, onControllerCreated: (MediaController) -> Unit) {
 
-            outputStream.write(1)
+        val mediaItem =
+            MediaItem.Builder()
+                .setMediaId("audiobe")
+                .setMediaMetadata(
+                    MediaMetadata.Builder()
+                        .setTitle("AudioBE")
+                        .build()
+                )
+                .build()
 
-            return Pair(socket.getInputStream(), outputStream)
-        } catch (_: ConnectException) {
-            sleep(1000)
-            return getActionIO(host,port)
-        }
+
+        val sessionToken = SessionToken(context, ComponentName(context, PlaybackService::class.java))
+        val controllerFuture = MediaController.Builder(context, sessionToken).buildAsync()
+
+        controllerFuture.addListener({
+            val controller = controllerFuture.get()
+            onControllerCreated(controller)
+            controller.setMediaItem(mediaItem)
+            controller.prepare()
+            controller.play()
+        }, ContextCompat.getMainExecutor(context))
+    }
+
+}
+fun getActionIO(host: String, port: Int): Pair<InputStream, OutputStream> {
+    try {
+        val socket = Socket(host, port)
+        val outputStream = socket.getOutputStream()
+
+        outputStream.write(1)
+
+        return Pair(socket.getInputStream(), outputStream)
+    } catch (_: ConnectException) {
+        sleep(1000)
+        return getActionIO(host,port)
     }
 }
 
@@ -269,6 +290,8 @@ fun startPlayback(host: String, port: Int) {
         startPlayback(host,port)
     }
 }
+
+
 //@Composable
 //fun Greeting(name: String, modifier: Modifier = Modifier) {
 //    Text(
