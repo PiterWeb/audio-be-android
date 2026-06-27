@@ -15,6 +15,7 @@ import android.os.IBinder
 import androidx.annotation.RequiresApi
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
+import java.lang.Thread.sleep
 import java.net.ConnectException
 import java.net.Socket
 
@@ -22,15 +23,18 @@ class PlaybackService : Service() {
 
     val CHANNEL_ID = "AudioBE"
 
-    lateinit var audioThread: AudioThread
+    lateinit var audioThread: Thread
 
     override fun onBind(p0: Intent?): IBinder? {
         return null
     }
 
+    @RequiresApi(Build.VERSION_CODES.S)
     override fun onCreate() {
         super.onCreate()
-        audioThread = AudioThread("192.168.1.36", 8080)
+        audioThread = Thread {
+            startPlayback("192.168.1.36", 8080)
+        }
         audioThread.start()
     }
 
@@ -72,16 +76,6 @@ class PlaybackService : Service() {
             context.getSystemService(NotificationManager::class.java) as NotificationManager
         notificationManager.createNotificationChannel(channel)
     }
-
-}
-
-class AudioThread(val host: String, val port: Int): Thread() {
-
-    @RequiresApi(Build.VERSION_CODES.S)
-    override fun run() {
-        startPlayback(host, port)
-    }
-
     @RequiresApi(Build.VERSION_CODES.S)
     fun startPlayback(host: String, port: Int) {
         try {
@@ -135,4 +129,5 @@ class AudioThread(val host: String, val port: Int): Thread() {
             startPlayback(host, port)
         }
     }
+
 }

@@ -1,12 +1,10 @@
 package com.piterdev.audiobe
 
 import android.content.Intent
-import android.media.AudioAttributes
-import android.media.AudioFormat
-import android.media.AudioManager
-import android.media.AudioTrack
+import android.content.IntentFilter
 import android.os.Build
 import android.os.Bundle
+import android.view.KeyEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -32,14 +30,12 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Color.Companion.White
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -50,11 +46,14 @@ import java.io.OutputStream
 import java.lang.Thread.sleep
 import java.net.ConnectException
 import java.net.Socket
+import kotlin.concurrent.thread
 
 
 class MainActivity : ComponentActivity() {
 
-    @RequiresApi(Build.VERSION_CODES.S)
+    lateinit var mediaButtonReceiver: MediaButtonReceiver
+
+    @RequiresApi(Build.VERSION_CODES.TIRAMISU)
     @OptIn(ExperimentalMaterial3Api::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -98,12 +97,7 @@ class MainActivity : ComponentActivity() {
                         ) {
                             IconButton(
                                 onClick = {
-                                    Thread {
-                                        val actionIO = getActionIO(host.value, port)
-                                        actionIO.second.use {
-                                            it.write(0)
-                                        }
-                                    }.start()
+                                    musicPrev(host.value, port)
                                 },
                                 colors = IconButtonColors(
                                     containerColor = MaterialTheme.colorScheme.primaryContainer,
@@ -118,12 +112,7 @@ class MainActivity : ComponentActivity() {
                             }
                             IconButton(
                                 onClick = {
-                                    Thread {
-                                        val actionIO = getActionIO(host.value, port)
-                                        actionIO.second.use {
-                                            it.write(1)
-                                        }
-                                    }.start()
+                                    musicPlayPause(host.value, port)
                                 },
                                 colors = IconButtonColors(
                                     containerColor = MaterialTheme.colorScheme.primaryContainer,
@@ -138,12 +127,7 @@ class MainActivity : ComponentActivity() {
                             }
                             IconButton(
                                 onClick = {
-                                    Thread {
-                                        val actionIO = getActionIO(host.value, port)
-                                        actionIO.second.use {
-                                            it.write(2)
-                                        }
-                                    }.start()
+                                    musicNext(host.value, port)
                                 },
                                 colors = IconButtonColors(
                                     containerColor = MaterialTheme.colorScheme.primaryContainer,
@@ -169,6 +153,25 @@ class MainActivity : ComponentActivity() {
         stopService(intent)
     }
 
+//    override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+//        println("onKeydown")
+//        when (keyCode) {
+//            KeyEvent.KEYCODE_MEDIA_PREVIOUS -> {
+//                musicPrev("192.168.1.36", 8080)
+//                return true
+//            }
+//            KeyEvent.KEYCODE_MEDIA_NEXT -> {
+//                musicNext("192.168.1.36", 8080)
+//                return true
+//            }
+//            KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> {
+//                musicPlayPause("192.168.1.36", 8080)
+//                return true
+//            }
+//        }
+//        return super.onKeyDown(keyCode, event)
+//    }
+
 }
 fun getActionIO(host: String, port: Int): Pair<InputStream, OutputStream> {
     try {
@@ -182,4 +185,33 @@ fun getActionIO(host: String, port: Int): Pair<InputStream, OutputStream> {
         sleep(1000)
         return getActionIO(host,port)
     }
+}
+
+fun musicPrev(host: String, port: Int) {
+    Thread {
+        val actionIO = getActionIO(host, port)
+        actionIO.second.use {
+            it.write(0)
+        }
+    }.start()
+}
+
+
+fun musicPlayPause(host: String, port: Int) {
+    Thread {
+        val actionIO = getActionIO(host, port)
+        actionIO.second.use {
+            it.write(1)
+        }
+    }.start()
+}
+
+
+fun musicNext(host: String, port: Int) {
+    Thread {
+        val actionIO = getActionIO(host, port)
+        actionIO.second.use {
+            it.write(2)
+        }
+    }.start()
 }
