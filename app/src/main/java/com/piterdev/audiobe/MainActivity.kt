@@ -1,7 +1,6 @@
 package com.piterdev.audiobe
 
-import android.content.ComponentName
-import android.content.Context
+import android.content.Intent
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioManager
@@ -34,7 +33,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -45,12 +43,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.content.ContextCompat
-import androidx.media3.common.MediaItem
-import androidx.media3.common.MediaMetadata
-import androidx.media3.common.Player
-import androidx.media3.session.MediaController
-import androidx.media3.session.SessionToken
 
 import com.piterdev.audiobe.ui.theme.AudioBETheme
 import java.io.InputStream
@@ -68,38 +60,13 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        setContent {
+        val intent = Intent(this@MainActivity, PlaybackService::class.java)
+        startForegroundService(intent)
 
-            val context = LocalContext.current
+        setContent {
 
             val host = remember { mutableStateOf("192.168.1.36") }
             val port = 8080
-
-            val mediaController = remember { mutableStateOf<MediaController?>(null)}
-
-            val currentPlaybackState = remember { mutableIntStateOf(Player.STATE_BUFFERING) }
-            val isPlaying = remember { mutableStateOf(true) }
-
-            LaunchedEffect(Unit) {
-                Thread {
-                    startPlayback(host.value, port)
-                }.start()
-            }
-
-            LaunchedEffect(Unit) {
-                buildMediaController(context = context, {
-                    mediaController.value = it
-                    mediaController.value?.addListener(object : Player.Listener {
-                        override fun onIsPlayingChanged(playing: Boolean) {
-                            isPlaying.value = playing
-                        }
-                        override fun onPlaybackStateChanged(playbackState: Int) {
-                            super.onPlaybackStateChanged(playbackState)
-                            currentPlaybackState.intValue = playbackState
-                        }
-                    })
-                })
-            }
 
             AudioBETheme {
                 Scaffold(
@@ -157,7 +124,6 @@ class MainActivity : ComponentActivity() {
                                             it.write(1)
                                         }
                                     }.start()
-                                    isPlaying.value = !isPlaying.value
                                 },
                                 colors = IconButtonColors(
                                     containerColor = MaterialTheme.colorScheme.primaryContainer,
@@ -197,29 +163,10 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    fun buildMediaController(context: Context, onControllerCreated: (MediaController) -> Unit) {
-
-        val mediaItem =
-            MediaItem.Builder()
-                .setMediaId("audiobe")
-                .setMediaMetadata(
-                    MediaMetadata.Builder()
-                        .setTitle("AudioBE")
-                        .build()
-                )
-                .build()
-
-
-        val sessionToken = SessionToken(context, ComponentName(context, PlaybackService::class.java))
-        val controllerFuture = MediaController.Builder(context, sessionToken).buildAsync()
-
-        controllerFuture.addListener({
-            val controller = controllerFuture.get()
-            onControllerCreated(controller)
-            controller.setMediaItem(mediaItem)
-            controller.prepare()
-            controller.play()
-        }, ContextCompat.getMainExecutor(context))
+    override fun onDestroy() {
+        super.onDestroy()
+        val intent = Intent(this@MainActivity, PlaybackService::class.java)
+        stopService(intent)
     }
 
 }
@@ -236,74 +183,3 @@ fun getActionIO(host: String, port: Int): Pair<InputStream, OutputStream> {
         return getActionIO(host,port)
     }
 }
-
-@RequiresApi(Build.VERSION_CODES.S)
-fun startPlayback(host: String, port: Int) {
-    try {
-
-        val bufSize = AudioTrack.getMinBufferSize(
-            44100,
-            AudioFormat.CHANNEL_OUT_STEREO,
-            AudioFormat.ENCODING_PCM_32BIT
-        )
-
-        val audio = AudioTrack(
-            AudioAttributes.Builder()
-                .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-                .setUsage(AudioAttributes.USAGE_MEDIA)
-                .build(),
-            AudioFormat.Builder()
-                .setSampleRate(44100)
-                .setEncoding(AudioFormat.ENCODING_PCM_32BIT)
-                .setChannelMask(AudioFormat.CHANNEL_OUT_STEREO)
-                .build(),  // 24-bit
-            bufSize,
-            AudioTrack.MODE_STREAM,
-            AudioManager.AUDIO_SESSION_ID_GENERATE
-        )
-
-        audio.play()
-
-        val socket = Socket(host, port)
-
-        socket.getOutputStream().use { outputStream ->
-            outputStream.write(0)
-            socket.getInputStream().use { audioInputStream ->
-                while (true) {
-                    val buf = ByteArray(bufSize)
-                    val n = audioInputStream.read(buf)
-
-                    if (n == -1) {
-                        break
-                    }
-
-                    audio.write(buf, 0, n)
-                }
-            }
-        }
-
-        sleep(1000)
-        startPlayback(host,port)
-
-    } catch (_: ConnectException) {
-        sleep(1000)
-        startPlayback(host,port)
-    }
-}
-
-
-//@Composable
-//fun Greeting(name: String, modifier: Modifier = Modifier) {
-//    Text(
-//        text = "Hello $name!",
-//        modifier = modifier
-//    )
-//}
-
-//@Preview(showBackground = true)
-//@Composable
-//fun GreetingPreview() {
-//    AudioBETheme {
-//        Greeting("Android")
-//    }
-//}

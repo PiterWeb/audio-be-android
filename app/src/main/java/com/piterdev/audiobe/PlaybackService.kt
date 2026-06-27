@@ -1,41 +1,138 @@
 package com.piterdev.audiobe
 
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.Service
+import android.content.Context
+import android.content.Intent
+import android.content.pm.ServiceInfo
+import android.media.AudioAttributes
+import android.media.AudioFormat
+import android.media.AudioManager
+import android.media.AudioTrack
+import android.os.Build
+import android.os.IBinder
+import androidx.annotation.RequiresApi
+import androidx.core.app.NotificationCompat
+import androidx.core.app.ServiceCompat
+import java.net.ConnectException
+import java.net.Socket
 
-import android.os.Bundle
-import androidx.annotation.OptIn
-import androidx.media3.common.util.UnstableApi
-import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.session.CommandButton
-import androidx.media3.session.MediaSession
-import androidx.media3.session.MediaSessionService
-import androidx.media3.session.SessionCommand
-import com.google.common.collect.ImmutableList
+class PlaybackService : Service() {
 
-class PlaybackService : MediaSessionService() {
-    private var mediaSession: MediaSession? = null
-    private val customCommandFavorites = SessionCommand("ACTION_PREVIOUS", Bundle.EMPTY)
+    val CHANNEL_ID = "AudioBE"
 
-    // Create your Player and MediaSession in the onCreate lifecycle event
-    @OptIn(UnstableApi::class)
+    lateinit var audioThread: AudioThread
+
+    override fun onBind(p0: Intent?): IBinder? {
+        return null
+    }
+
     override fun onCreate() {
         super.onCreate()
-
-        val previousButton = CommandButton.Builder(CommandButton.ICON_PREVIOUS).setDisplayName("Previous").setSessionCommand(customCommandFavorites).build()
-
-        val player = ExoPlayer.Builder(this).build()
-        mediaSession = MediaSession.Builder(this, player).setMediaButtonPreferences(ImmutableList.of(previousButton)).build()
+        audioThread = AudioThread("192.168.1.36", 8080)
+        audioThread.start()
     }
 
-    // Remember to release the player and media session in onDestroy
     override fun onDestroy() {
-        mediaSession?.run {
-            player.release()
-            release()
-            mediaSession = null
-        }
         super.onDestroy()
+        stopSelf()
+        audioThread.interrupt()
     }
 
-    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? =
-        mediaSession
+    @RequiresApi(Build.VERSION_CODES.S)
+    override fun onStartCommand(intent: Intent, flags: Int, startId: Int): Int {
+        try {
+
+            createNotificationChannel(this)
+
+            val notification = NotificationCompat.Builder(this, CHANNEL_ID).setContentTitle("AudioBE").setContentText("Playing music in background").setPriority(
+                NotificationCompat.PRIORITY_DEFAULT).build()
+            ServiceCompat.startForeground(
+                this,
+                100,
+                notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+            )
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        return START_STICKY_COMPATIBILITY
+    }
+
+    fun createNotificationChannel(context: Context) {
+        val name = "AudioBE"
+        val descriptionText = "Playing music in background"
+        val importance = NotificationManager.IMPORTANCE_DEFAULT
+        val channel = NotificationChannel(CHANNEL_ID, name, importance).apply {
+            description = descriptionText
+        }
+        // Register the channel with the system.
+        val notificationManager: NotificationManager =
+            context.getSystemService(NotificationManager::class.java) as NotificationManager
+        notificationManager.createNotificationChannel(channel)
+    }
+
+}
+
+class AudioThread(val host: String, val port: Int): Thread() {
+
+    @RequiresApi(Build.VERSION_CODES.S)
+    override fun run() {
+        startPlayback(host, port)
+    }
+
+    @RequiresApi(Build.VERSION_CODES.S)
+    fun startPlayback(host: String, port: Int) {
+        try {
+
+            val bufSize = AudioTrack.getMinBufferSize(
+                44100,
+                AudioFormat.CHANNEL_OUT_STEREO,
+                AudioFormat.ENCODING_PCM_32BIT
+            )
+
+            val audio = AudioTrack(
+                AudioAttributes.Builder()
+                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .build(),
+                AudioFormat.Builder()
+                    .setSampleRate(44100)
+                    .setEncoding(AudioFormat.ENCODING_PCM_32BIT)
+                    .setChannelMask(AudioFormat.CHANNEL_OUT_STEREO)
+                    .build(),  // 24-bit
+                bufSize,
+                AudioTrack.MODE_STREAM,
+                AudioManager.AUDIO_SESSION_ID_GENERATE
+            )
+
+            audio.play()
+
+            val socket = Socket(host, port)
+
+            socket.getOutputStream().use { outputStream ->
+                outputStream.write(0)
+                socket.getInputStream().use { audioInputStream ->
+                    while (true) {
+                        val buf = ByteArray(bufSize)
+                        val n = audioInputStream.read(buf)
+
+                        if (n == -1) {
+                            break
+                        }
+
+                        audio.write(buf, 0, n)
+                    }
+                }
+            }
+
+            sleep(1000)
+            startPlayback(host, port)
+
+        } catch (_: ConnectException) {
+            sleep(1000)
+            startPlayback(host, port)
+        }
+    }
 }
