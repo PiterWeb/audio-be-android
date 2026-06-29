@@ -1,7 +1,11 @@
 package com.piterdev.audiobe
 
+import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.net.nsd.NsdManager
+import android.net.nsd.NsdServiceInfo
+import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Bundle
 import android.view.KeyEvent
@@ -9,6 +13,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.annotation.RequiresApi
+import androidx.annotation.RequiresExtension
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -30,8 +35,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -51,7 +54,80 @@ import kotlin.concurrent.thread
 
 class MainActivity : ComponentActivity() {
 
-    lateinit var mediaButtonReceiver: MediaButtonReceiver
+    // lateinit var mediaButtonReceiver: MediaButtonReceiver
+
+    var host = "0.0.0.0"
+    var port = 8080
+
+    // Instantiate a new DiscoveryListener
+    private val discoveryListener = object : NsdManager.DiscoveryListener {
+
+        var lock: WifiManager.MulticastLock? = null
+        var nsdManager: NsdManager? = null
+
+        // Called as soon as service discovery begins.
+        override fun onDiscoveryStarted(regType: String) {
+            lock?.acquire()
+            println("Service discovery started")
+        }
+
+        override fun onServiceFound(service: NsdServiceInfo) {
+            // A service was found! Do something with it.
+            println("Service discovery success$service")
+            when {
+                service.serviceType != "_ws._tcp." -> return
+                service.serviceName != "AudioBE" -> return
+                else -> {
+                    nsdManager?.resolveService(service, resolveListener)
+                     nsdManager?.stopServiceDiscovery(this)
+                }
+            }
+        }
+
+        override fun onServiceLost(service: NsdServiceInfo) {
+            // When the network service is no longer available.
+            // Internal bookkeeping code goes here.
+            println("service lost: $service")
+        }
+
+        override fun onDiscoveryStopped(serviceType: String) {
+            lock?.release()
+            println("Discovery stopped: $serviceType")
+        }
+
+        override fun onStartDiscoveryFailed(serviceType: String, errorCode: Int) {
+            println("Discovery failed: Error code:$errorCode")
+            nsdManager?.stopServiceDiscovery(this)
+        }
+
+        override fun onStopDiscoveryFailed(serviceType: String, errorCode: Int) {
+            println("Discovery failed: Error code:$errorCode")
+            nsdManager?.stopServiceDiscovery(this)
+        }
+    }
+
+    private val resolveListener = object : NsdManager.ResolveListener {
+
+        override fun onResolveFailed(serviceInfo: NsdServiceInfo, errorCode: Int) {
+            // Called when the resolve fails. Use the error code to debug.
+           println("Resolve failed: $errorCode")
+        }
+
+        @RequiresExtension(extension = Build.VERSION_CODES.TIRAMISU, version = 7)
+        override fun onServiceResolved(serviceInfo: NsdServiceInfo) {
+            println("Resolve Succeeded. $serviceInfo")
+            port = serviceInfo.port
+            host = serviceInfo.hostAddresses.firstOrNull()?.hostAddress.orEmpty()
+
+            val intent = Intent(this@MainActivity, PlaybackService::class.java)
+
+            intent.putExtra("host", host)
+            intent.putExtra("port", port)
+
+            startForegroundService(intent)
+
+        }
+    }
 
     @RequiresApi(Build.VERSION_CODES.TIRAMISU)
     @OptIn(ExperimentalMaterial3Api::class)
@@ -59,13 +135,16 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        val intent = Intent(this@MainActivity, PlaybackService::class.java)
-        startForegroundService(intent)
+        val nsdManager = getSystemService(NSD_SERVICE) as NsdManager
+        discoveryListener.nsdManager = nsdManager
+
+        val wifi = getSystemService(WIFI_SERVICE) as WifiManager?
+        val lock = wifi?.createMulticastLock("audiobe")
+        discoveryListener.lock = lock
+
+        nsdManager.discoverServices("_ws._tcp", NsdManager.PROTOCOL_DNS_SD, discoveryListener)
 
         setContent {
-
-            val host = remember { mutableStateOf("192.168.1.36") }
-            val port = 8080
 
             AudioBETheme {
                 Scaffold(
@@ -97,7 +176,7 @@ class MainActivity : ComponentActivity() {
                         ) {
                             IconButton(
                                 onClick = {
-                                    musicPrev(host.value, port)
+                                    musicPrev(host, port)
                                 },
                                 colors = IconButtonColors(
                                     containerColor = MaterialTheme.colorScheme.primaryContainer,
@@ -112,7 +191,7 @@ class MainActivity : ComponentActivity() {
                             }
                             IconButton(
                                 onClick = {
-                                    musicPlayPause(host.value, port)
+                                    musicPlayPause(host, port)
                                 },
                                 colors = IconButtonColors(
                                     containerColor = MaterialTheme.colorScheme.primaryContainer,
@@ -127,7 +206,7 @@ class MainActivity : ComponentActivity() {
                             }
                             IconButton(
                                 onClick = {
-                                    musicNext(host.value, port)
+                                    musicNext(host, port)
                                 },
                                 colors = IconButtonColors(
                                     containerColor = MaterialTheme.colorScheme.primaryContainer,
@@ -152,25 +231,6 @@ class MainActivity : ComponentActivity() {
         val intent = Intent(this@MainActivity, PlaybackService::class.java)
         stopService(intent)
     }
-
-//    override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
-//        println("onKeydown")
-//        when (keyCode) {
-//            KeyEvent.KEYCODE_MEDIA_PREVIOUS -> {
-//                musicPrev("192.168.1.36", 8080)
-//                return true
-//            }
-//            KeyEvent.KEYCODE_MEDIA_NEXT -> {
-//                musicNext("192.168.1.36", 8080)
-//                return true
-//            }
-//            KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> {
-//                musicPlayPause("192.168.1.36", 8080)
-//                return true
-//            }
-//        }
-//        return super.onKeyDown(keyCode, event)
-//    }
 
 }
 fun getActionIO(host: String, port: Int): Pair<InputStream, OutputStream> {

@@ -32,10 +32,6 @@ class PlaybackService : Service() {
     @RequiresApi(Build.VERSION_CODES.S)
     override fun onCreate() {
         super.onCreate()
-        audioThread = Thread {
-            startPlayback("192.168.1.36", 8080)
-        }
-        audioThread.start()
     }
 
     override fun onDestroy() {
@@ -47,6 +43,14 @@ class PlaybackService : Service() {
     @RequiresApi(Build.VERSION_CODES.S)
     override fun onStartCommand(intent: Intent, flags: Int, startId: Int): Int {
         try {
+
+            val address = intent.getStringExtra("host").orEmpty()
+            val port = intent.getIntExtra("port", 8080)
+
+            audioThread = Thread {
+                startPlayback(address, port)
+            }
+            audioThread.start()
 
             createNotificationChannel(this)
 
