@@ -1,14 +1,11 @@
 package com.piterdev.audiobe
 
-import android.content.Context
 import android.content.Intent
-import android.content.IntentFilter
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
 import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Bundle
-import android.view.KeyEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -35,21 +32,30 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Color.Companion.White
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
+import coil3.compose.AsyncImage
 
 import com.piterdev.audiobe.ui.theme.AudioBETheme
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
 import java.io.InputStream
 import java.io.OutputStream
 import java.lang.Thread.sleep
 import java.net.ConnectException
 import java.net.Socket
-import kotlin.concurrent.thread
 
 
 class MainActivity : ComponentActivity() {
@@ -146,6 +152,23 @@ class MainActivity : ComponentActivity() {
 
         setContent {
 
+            val title = remember { mutableStateOf("Title") }
+
+            val artUrl = remember { mutableStateOf("http://0.0.0.0") }
+            val artists = remember { mutableStateListOf("") }
+
+            LaunchedEffect(Unit) {
+                Thread{
+                    populateMetaData(host, port) { metadata ->
+                        title.value = metadata.title
+                        artUrl.value = metadata.art_url
+                        artists.clear()
+                        artists.addAll(metadata.artists)
+                        println("Title: ${title.value}, ArtUrl: ${artUrl.value}, Artist: $artists")
+                    }
+                }.start()
+            }
+
             AudioBETheme {
                 Scaffold(
                     modifier = Modifier
@@ -166,8 +189,19 @@ class MainActivity : ComponentActivity() {
                         modifier = Modifier
                             .padding(innerPadding)
                             .fillMaxSize(),
-                        verticalArrangement = Arrangement.Center
+                        horizontalAlignment = Alignment.CenterHorizontally
                     ) {
+                        Column(
+                            modifier = Modifier.padding(0.dp,64.dp, 0.dp, 0.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                        ) {
+                            Text(title.value, modifier = Modifier.padding(8.dp) ,fontSize = 7.em, textAlign = TextAlign.Center, maxLines = 4)
+                            AsyncImage(
+                                model = artUrl.value,
+                                contentDescription = title.value
+                            )
+                            Text(artists.joinToString(","), modifier = Modifier.padding(8.dp), fontSize = 6.em, textAlign = TextAlign.Center)
+                        }
                         Row(
                             modifier = Modifier
                                 .fillMaxSize(),
@@ -226,12 +260,44 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    @Serializable
+    data class MetaData(
+        val title: String,
+        val art_url: String,
+        val artists: ArrayList<String>
+    )
+
+    fun populateMetaData(host:String, port:Int, cllbk: (metadata: MetaData) -> Unit) {
+        val metadataIO = getMetaDataIO(host, port)
+        metadataIO.first.use {
+            it.bufferedReader().forEachLine { line ->
+                if (line.trim().isEmpty()) return@forEachLine
+                val metadata = Json.decodeFromString<MetaData>(line)
+                cllbk(metadata)
+            }
+        }
+    }
+
     override fun onDestroy() {
         super.onDestroy()
         val intent = Intent(this@MainActivity, PlaybackService::class.java)
         stopService(intent)
     }
 
+}
+
+fun getMetaDataIO(host: String, port: Int): Pair<InputStream, OutputStream> {
+    try {
+        val socket = Socket(host, port)
+        val outputStream = socket.getOutputStream()
+
+        outputStream.write(2)
+
+        return Pair(socket.getInputStream(), outputStream)
+    } catch (_: ConnectException) {
+        sleep(1000)
+        return getActionIO(host,port)
+    }
 }
 fun getActionIO(host: String, port: Int): Pair<InputStream, OutputStream> {
     try {
