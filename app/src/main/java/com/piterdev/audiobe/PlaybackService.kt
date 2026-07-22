@@ -84,34 +84,41 @@ class PlaybackService : Service() {
     fun startPlayback(host: String, port: Int) {
         try {
 
-            val bufSize = AudioTrack.getMinBufferSize(
-                44100,
-                AudioFormat.CHANNEL_OUT_STEREO,
-                AudioFormat.ENCODING_PCM_32BIT
-            )
-
-            val audio = AudioTrack(
-                AudioAttributes.Builder()
-                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-                    .setUsage(AudioAttributes.USAGE_MEDIA)
-                    .build(),
-                AudioFormat.Builder()
-                    .setSampleRate(44100)
-                    .setEncoding(AudioFormat.ENCODING_PCM_32BIT)
-                    .setChannelMask(AudioFormat.CHANNEL_OUT_STEREO)
-                    .build(),  // 24-bit
-                bufSize,
-                AudioTrack.MODE_STREAM,
-                AudioManager.AUDIO_SESSION_ID_GENERATE
-            )
-
-            audio.play()
-
             val socket = Socket(host, port)
 
             socket.getOutputStream().use { outputStream ->
                 outputStream.write(0)
-                socket.getInputStream().use { audioInputStream ->
+
+                val inputStream = socket.getInputStream()
+
+                val bits = inputStream.read()
+
+                val audioFormat = if (bits == 16) AudioFormat.ENCODING_PCM_16BIT else AudioFormat.ENCODING_PCM_32BIT
+
+                val bufSize = AudioTrack.getMinBufferSize(
+                    44100,
+                    AudioFormat.CHANNEL_OUT_STEREO,
+                    audioFormat
+                )
+
+                val audio = AudioTrack(
+                    AudioAttributes.Builder()
+                        .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        .build(),
+                    AudioFormat.Builder()
+                        .setSampleRate(44100)
+                        .setEncoding(audioFormat)
+                        .setChannelMask(AudioFormat.CHANNEL_OUT_STEREO)
+                        .build(),  // 24-bit
+                    bufSize,
+                    AudioTrack.MODE_STREAM,
+                    AudioManager.AUDIO_SESSION_ID_GENERATE
+                )
+
+                audio.play()
+
+                inputStream.use { audioInputStream ->
                     while (true) {
                         val buf = ByteArray(bufSize)
                         val n = audioInputStream.read(buf)
